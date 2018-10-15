@@ -24,11 +24,9 @@ parameters:
   name: GIT_BRANCH
   required: false
 - displayName: DEV project name (defaults to 'proj-<PROJECT>-dev')
-  value: proj-${DEV_PROJECT}-dev
   name: DEV_PROJECT
   required: true
 - displayName: STAGE project name (defaults to 'proj-<PROJECT>-stage')
-  value: proj-${STAGE_PROJECT}-stage
   name: STAGE_PROJECT
   required: true
 - description: Webhook secret
@@ -74,9 +72,9 @@ objects:
         - name: PROJECT_NAME
           value: ${PROJECT_NAME}
         - name: DEV_PROJECT
-          value: proj-${DEV_PROJECT}-dev
+          value: ${DEV_PROJECT}
         - name: STAGE_PROJECT
-          value: proj-${STAGE_PROJECT}-stage
+          value: ${STAGE_PROJECT}
         - name: GIT_BRANCH
           value: ${GIT_BRANCH}
         - name: GIT_URL_REPO
@@ -88,6 +86,11 @@ objects:
           def project=env.DEV_PROJECT
 
           pipeline {
+            environment {
+              PRODUCT_OWNERS_GROUP = 'G_OCP_PRODUCTION_APPROVER'
+              RELEASERS_GROUP = 'G_OCP_PRODUCTION_RELEASER'
+              DEPLOYERS_GROUP = 'G_OCP_PRODUCTION_OPERATOR'
+            }
             agent {
               label 'maven'
             }
@@ -144,39 +147,17 @@ objects:
               }
               stage('Build Image') {
                 steps {
-                  sh "rm -rf oc-build && mkdir -p oc-build/deployments"
-                  sh "cp target/*.war oc-build/deployments/ROOT.war"
-                  sh "oc start-build ${env.PROJECT_NAME} --from-file=oc-build/deployments/ROOT.war -n ${env.DEV_PROJECT} --wait"
-                }
-              }
-              stage('Create DEV') {
-                when {
-                  expression {
-                    openshift.withCluster() {
-                      openshift.withProject(env.DEV_PROJECT) {
-                        return !openshift.selector('dc', '${env.PROJECT_NAME}').exists()
-                      }
-                    }
-                  }
-                }
-                steps {
                   script {
                     openshift.withCluster() {
                       openshift.withProject(env.DEV_PROJECT) {
-                        def app = openshift.newApp("${env.PROJECT_NAME}:latest")
-                        app.narrow("svc").expose();
+                        sh "rm -rf oc-build && mkdir -p oc-build/deployments"
+                        sh "cp target/*.war oc-build/deployments/ROOT.war"
+                        fileName = "oc-build/deployments/ROOT.war"
 
-                        openshift.set("probe dc/${env.PROJECT_NAME} --readiness --get-url=http://:8080/actuator/health --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10")
-                        openshift.set("probe dc/${env.PROJECT_NAME} --liveness  --get-url=http://:8080/actuator/health --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10")
-
-                        def dc = openshift.selector("dc", "${env.PROJECT_NAME}")
-                        while (dc.object().spec.replicas != dc.object().status.availableReplicas) {
-                            sleep 10
-                        }
-                        openshift.set("triggers", "dc/${env.PROJECT_NAME}", "--manual")
+                        openshift.selector("bc", "${env.PROJECT_NAME}").startBuild("--from-file=${fileName}", "--wait=true")
                       }
                     }
-                  }
+                  }      
                 }
               }
               stage('Deploy DEV') {

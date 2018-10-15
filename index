@@ -2,3 +2,19 @@ https://blog.sonatype.com/nexus-in-openshift
 # template foda (com dev,staging) + jenkins pipelines
 https://github.com/siamaksade/openshift-cd-demo
 https://blog.openshift.com/cicd-with-openshift/
+
+oc delete bc/gmapseta-pipeline
+
+oc new-build --name=gmapseta --image-stream=wildfly:latest --binary=true -n proj-gmapseta-dev
+oc new-app gmapseta-api:latest --allow-missing-images -n proj-gmapseta-dev
+oc expose dc/gmapseta-api --port=8080 -n proj-gmapseta-dev
+oc expose svc/gmapseta-api -n proj-gmapseta-dev
+oc rollout cancel dc/gmapseta-api -n proj-gmapseta-dev
+oc set triggers dc -l app=gmapseta-api --containers=gmapseta-api --from-image=gmapseta-api:latest --manual -n proj-gmapseta-dev
+
+oc new-app -n cicd-devtools -f cicd.yaml --param PROJECT_NAME=gmapseta-api --param GIT_URL_REPO=http://gitlab-cicd-devtools.192.168.42.171.nip.io/root/gmapseta-api.git --param SONAR_URL=http://sonar-cicd-devtools.192.168.42.171.nip.io --param GIT_BRANCH=master --param DEV_PROJECT=proj-gmapseta-dev --param STAGE_PROJECT=proj-gmapseta-stage
+
+oc get pod --all-namespaces  | grep Evicted
+
+oc get pods -a --all-namespaces -o json | jq  '.items[] | select(.status.reason!=null) | select(.status.reason | contains("Evicted")) | "oc delete pod \(.metadata.name) -n \(.metadata.namespace)"' | xargs -n 1 bash -c
+
