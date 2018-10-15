@@ -1,0 +1,18 @@
+https://github.com/OpenShiftDemos/sonarqube-openshift-docker
+https://github.com/OpenShiftDemos/sonarqube-openshift-docker/blob/master/sonarqube-template.yaml
+https://github.com/wkulhanek/docker-openshift-sonarqube
+https://github.com/in-the-keyhole/openshift-sonarqube-s2i
+https://github.com/ruromero/sonarqube-ocp
+
+# funcionou com este template. Parametrização via console não funfou. Criar a app via console web.
+https://github.com/RHsyseng/docker-rhel-sonarqube
+
+oc new-app -f sonarqube-postgresql-template.yaml --param=SONARQUBE_VERSION=6.7
+oc new-app sonarqube --param=SONARQUBE_VERSION=6.7
+
+oc create -f ocp-resources/postgresql-pv.yaml
+oc create -f ocp-resources/sonar-pv.yaml
+oc create -f ocp-resources/sonarqube-postgresql-template.yaml -n cicd-devtools
+oc new-app sonarqube-postgresql
+
+

@@ -1,0 +1,13 @@
+https://github.com/sonatype/docker-rhel-nexus
+https://github.com/OpenShiftDemos/nexus
+https://github.com/siamaksade/ansible-openshift-nexus
+
+troubleshooting:
+https://github.com/OpenShiftDemos/nexus/issues/1
+https://blog.sonatype.com/improving-build-time-of-java-builds-on-openshift
+
+securityContext:
+        runAsUser: 1000100001
+
+securityContext:
+  fsGroup: 2000

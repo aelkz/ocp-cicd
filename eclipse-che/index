@@ -1,0 +1,17 @@
+https://github.com/siamaksade/ansible-openshift-eclipse-che.git
+https://github.com/siamaksade/ansible-openshift-eclipse-che
+https://github.com/eclipse/che/tree/master/deploy/openshift/templates
+
+
+
+
+oc apply -f pvc/che-server-pvc.yaml;
+
+oc new-app -f che-server-template.yaml -p ROUTING_SUFFIX=e8ca.engint.openshiftapps.com \
+-p PROTOCOL=https \
+-p WS_PROTOCOL=wss \
+-p TLS=true;
+
+oc set volume dc/che --add -m /data --name=che-data-volume --claim-name=che-data-volume;
+
+oc apply -f https/che-route-tls.yaml
