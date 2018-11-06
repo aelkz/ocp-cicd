@@ -2,8 +2,24 @@ https://blog.sonatype.com/nexus-in-openshift
 # template foda (com dev,staging) + jenkins pipelines
 https://github.com/siamaksade/openshift-cd-demo
 https://blog.openshift.com/cicd-with-openshift/
+https://github.com/openshift/library/tree/master/community
+https://ruddra.com/openshift-python-gunicorn-nginx-jenkins-pipelines-part-two/
+https://access.redhat.com/solutions/2899091
 
-oc delete bc/gmapseta-pipeline
+eval $(minishift docker-env)
+eval $(minishift oc-env)
+
+oc adm prune images --keep-tag-revisions=1 --keep-younger-than=30m
+docker system prune -a -f
+docker rmi $(docker images --filter "dangling=true" -q --no-trunc)
+docker images --no-trunc -aqf "dangling=true" | xargs docker rmi
+
+oc edit scc anyuid
+
+oc new-project cicd-devtools --description="CI/CD Development Tools" --display-name="CI/CD Development Tools"
+
+oc delete bc/gmapseta-api-pipeline
+oc delete jobs/cicd-application-installer
 
 oc new-build --name=gmapseta --image-stream=wildfly:latest --binary=true -n proj-gmapseta-dev
 oc new-app gmapseta-api:latest --allow-missing-images -n proj-gmapseta-dev
@@ -11,10 +27,46 @@ oc expose dc/gmapseta-api --port=8080 -n proj-gmapseta-dev
 oc expose svc/gmapseta-api -n proj-gmapseta-dev
 oc rollout cancel dc/gmapseta-api -n proj-gmapseta-dev
 oc set triggers dc -l app=gmapseta-api --containers=gmapseta-api --from-image=gmapseta-api:latest --manual -n proj-gmapseta-dev
+---
+oc delete bc/gmapseta-api
+oc new-build --name=gmapseta-api --image-stream=wildfly:10.1 --binary=true -n proj-gmapseta-dev
+oc new-app gmapseta-api:latest --allow-missing-images -n proj-gmapseta-dev
+oc set triggers dc -l app=gmapseta-api --containers=gmapseta-api --from-image=gmapseta-api:latest --manual -n proj-gmapseta-dev
+---
 
-oc new-app -n cicd-devtools -f cicd.yaml --param PROJECT_NAME=gmapseta-api --param GIT_URL_REPO=http://gitlab-cicd-devtools.192.168.42.171.nip.io/root/gmapseta-api.git --param SONAR_URL=http://sonar-cicd-devtools.192.168.42.171.nip.io --param GIT_BRANCH=master --param DEV_PROJECT=proj-gmapseta-dev --param STAGE_PROJECT=proj-gmapseta-stage
+oc new-project proj-gmapseta-dev --description="projeto: gmapseta" --display-name="proj-gmapseta-dev"
+oc new-project proj-gmapseta-stage --description="projeto: gmapseta" --display-name="proj-gmapseta-stage"
+
+oc policy add-role-to-group edit system:serviceaccounts:cicd-devtools -n proj-gmapseta-dev
+oc policy add-role-to-group edit system:serviceaccounts:cicd-devtools -n proj-gmapseta-stage
+
+oc new-app -n cicd-devtools -f cicd.yaml --param APPLICATION_NAME=gmapseta-api --param GIT_URL_REPO=http://gitlab-cicd-devtools.192.168.42.90.nip.io/root/gmapseta-api.git --param SONAR_URL=http://sonar-cicd-devtools.192.168.42.90.nip.io --param CLUSTER_IP_ADDRESS=192.168.42.90 --param GIT_BRANCH=master --param DEV_PROJECT=proj-gmapseta-dev --param UAT_PROJECT=proj-gmapseta-uat --param PRD_PROJECT=proj-gmapseta-prd --param REPLICAS=1
+oc get jobs
+oc describe jobs/cicd-application-installer
+oc run cicd-application-installer --image=openshift/origin:v3.10 --replicas=1 --restart=Never
 
 oc get pod --all-namespaces  | grep Evicted
 
-oc get pods -a --all-namespaces -o json | jq  '.items[] | select(.status.reason!=null) | select(.status.reason | contains("Evicted")) | "oc delete pod \(.metadata.name) -n \(.metadata.namespace)"' | xargs -n 1 bash -c
+oc get pod --all-namespaces  | grep Evicted
+
+oc get pods --all-namespaces -o json | jq '.items[] | select(.status.reason!=null) | select(.status.reason | contains("Evicted")) | "oc delete pod \(.metadata.name) -n (.metadata.namespace)"' | xargs -n1 bash -c '$1'
+
+-----
+docker login -u admin -p $(oc whoami -t) $(minishift openshift registry)
+
+-- import: openshift image
+oc import-image openshift/redhat-sso72-openshift --from=registry.access.redhat.com/redhat-sso-7/sso72-openshift --confirm
+oc import-image my-jboss-eap-7/eap71-openshift --from=registry.access.redhat.com/jboss-eap-7/eap71-openshift --confirm
+
+-- import: docker image
+docker pull registry.access.redhat.com/redhat-sso-7/sso72-openshift
+docker pull registry.access.redhat.com/jboss-eap-7/eap71-openshift
+
+docker tag registry.access.redhat.com/redhat-sso-7/sso72-openshift:latest $(minishift openshift registry)/openshift/sso72-openshift:1.2
+
+docker pull openshift/wildfly-101-centos7
+docker tag docker.io/openshift/wildfly-101-centos7:latest 172.30.1.1:5000/openshift/wildfly-101-centos7:v10.1
+
+docker tag 172.30.1.1:5000/openshift/wildfly-101-centos7:v10.1 openshift/wildfly-101-centos7:v10.1 
+-----
 

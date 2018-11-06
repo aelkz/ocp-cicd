@@ -198,7 +198,7 @@ objects:
                     echo "INFO: creating new build from image-stream."
                     openshift.withCluster() {
                       openshift.withProject(env.DEV_PROJECT) {
-                        openshift.newBuild("--name=${env.APPLICATION_NAME}", "--image-stream=openshift/wildfly:12.0", "--binary=true")
+                        openshift.newBuild("--name=${env.APPLICATION_NAME}", "--image-stream=openshift/wildfly:10.1", "--binary=true")
                       }
                     }
                   }

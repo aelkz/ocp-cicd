@@ -1,0 +1,1328 @@
+# https://docs.openshift.com/container-platform/3.4/dev_guide/deployments/deployment_strategies.html
+# https://blog.openshift.com/using-post-hook-to-initialize-a-database/
+# ############################################################
+# ########## GITLAB-CE #######################################
+# ############################################################
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  createdBy: raphael.alex@gmail.com
+metadata:
+  annotations:
+    description: "GitLab. Collaboration and source control management: code, test,
+      and deploy together! \n\n GitLab requries that the serviceaccount for the main
+      GitLab app be added to the anyuid security context. The service account name
+      is: <application name>-user"
+    iconClass: icon-gitlab
+    tags: instant-app,gitlab,VCS,ci-cd
+  creationTimestamp: null
+  name: gitlab-ce
+  selfLink: /apis/template.openshift.io/v1/namespaces/cicd-devtools/templates/gitlab-ce
+objects:
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    tags:
+    - from:
+        kind: DockerImage
+        name: gitlab/gitlab-ce:11.3.0-ce.0
+      name: gitlab-11.3.0
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}-redis
+  spec:
+    tags:
+    - from:
+        kind: DockerImage
+        name: redis:3.2.3-alpine
+      name: 3.2.3
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ${APPLICATION_NAME}-user
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    replicas: 1
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+    strategy:
+      recreateParams:
+        post:
+          execNewPod:
+            command:
+            - /bin/sh
+            - c
+            - chown git /gitlab-data
+            containerName: gitlab-ce
+          failurePolicy: Abort
+      resources: {}
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+          deploymentconfig: ${APPLICATION_NAME}
+      spec:
+        containers:
+        - env:
+          - name: GITLAB_OMNIBUS_CONFIG
+            value: hostname='gitlab-cicd-devtools'; external_url "http://#{hostname}.${CLUSTER_IP_ADDRESS}.nip.io"
+              unless hostname.to_s == ''; root_pass='${GITLAB_ROOT_PASSWORD}'; gitlab_rails['initial_root_password']=root_pass
+              unless root_pass.to_s == ''; postgresql['enable']=false; gitlab_rails['db_host']
+              = '${APPLICATION_NAME}-postgresql'; gitlab_rails['db_password']='${POSTGRESQL_PASSWORD}';
+              gitlab_rails['db_username']='${POSTGRESQL_USER}'; gitlab_rails['db_database']='${POSTGRESQL_DATABASE}';
+              redis['enable'] = false; gitlab_rails['redis_host']='${APPLICATION_NAME}-redis';
+              unicorn['worker_processes'] = ${UNICORN_WORKERS}; manage_accounts['enable']
+              = true; manage_storage_directories['manage_etc'] = false; gitlab_shell['auth_file']
+              = '/gitlab-data/ssh/authorized_keys'; git_data_dirs({ 'default' => {
+              'path' => '/gitlab-data/git-data' } }); gitlab_rails['shared_path']
+              = '/gitlab-data/shared'; gitlab_rails['uploads_directory'] = '/gitlab-data/uploads';
+              gitlab_ci['builds_directory'] = '/gitlab-data/builds'; prometheus_monitoring['enable']
+              = false;
+          image: gitlab-ce
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /help
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 600
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 1
+          name: gitlab-ce
+          ports:
+          - containerPort: 22
+            protocol: TCP
+          - containerPort: 80
+            protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /help
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /etc/gitlab
+            name: gitlab-ce-volume-1
+          - mountPath: /gitlab-data
+            name: gitlab-ce-volume-2
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        serviceAccount: ${APPLICATION_NAME}-user
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: gitlab-ce-volume-1
+          persistentVolumeClaim:
+            claimName: ${APPLICATION_NAME}-etc
+        - name: gitlab-ce-volume-2
+          persistentVolumeClaim:
+            claimName: ${APPLICATION_NAME}-data
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - gitlab-ce
+        from:
+          kind: ImageStreamTag
+          name: ${APPLICATION_NAME}:gitlab-11.3.0
+      type: ImageChange
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}-redis
+  spec:
+    replicas: 1
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}-redis
+    strategy:
+      recreateParams: {}
+      resources: {}
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+          deploymentconfig: ${APPLICATION_NAME}-redis
+      spec:
+        containers:
+        - args:
+          - exec redis-server
+          command:
+          - /bin/sh
+          - -ec
+          image: gitlab-ce-redis
+          imagePullPolicy: IfNotPresent
+          name: gitlab-ce-redis
+          ports:
+          - containerPort: 6379
+            protocol: TCP
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 300Mi
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /data
+            name: gitlab-ce-volume-4
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: gitlab-ce-volume-4
+          persistentVolumeClaim:
+            claimName: ${APPLICATION_NAME}-redis-data
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - gitlab-ce-redis
+        from:
+          kind: ImageStreamTag
+          name: ${APPLICATION_NAME}-redis:3.2.3
+      type: ImageChange
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}-postgresql
+  spec:
+    replicas: 1
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}-postgresql
+    strategy:
+      recreateParams:
+        post:
+          execNewPod:
+            command:
+            - /usr/bin/scl
+            - enable
+            - rh-postgresql94
+            - export PGPASSWORD='${POSTGRESQL_ADMIN_PASSWORD}'; psql -h '${APPLICATION_NAME}-postgresql'
+              -U postgres -d ${POSTGRESQL_DATABASE} -c 'CREATE EXTENSION IF NOT EXISTS
+              pg_trgm;'
+            containerName: gitlab-ce-postgresql
+            env:
+            - name: HOME
+              value: /var/lib/pgsql
+            - name: PGDATA
+              value: /var/lib/pgsql/data/userdata
+            - name: CONTAINER_SCRIPTS_PATH
+              value: /usr/share/container-scripts/postgresql
+          failurePolicy: Abort
+      resources: {}
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+          deploymentconfig: ${APPLICATION_NAME}-postgresql
+      spec:
+        containers:
+        - env:
+          - name: POSTGRESQL_USER
+            value: ${POSTGRESQL_USER}
+          - name: POSTGRESQL_PASSWORD
+            value: ${POSTGRESQL_PASSWORD}
+          - name: POSTGRESQL_DATABASE
+            value: ${POSTGRESQL_DATABASE}
+          - name: POSTGRESQL_ADMIN_PASSWORD
+            value: ${POSTGRESQL_ADMIN_PASSWORD}
+          image: gitlab-ce-postgresql
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            initialDelaySeconds: 60
+            tcpSocket:
+              port: 5432
+            timeoutSeconds: 1
+          name: gitlab-ce-postgresql
+          ports:
+          - containerPort: 5432
+            protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+              - /bin/sh
+              - -i
+              - -c
+              - psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c
+                'SELECT 1'
+            initialDelaySeconds: 30
+            timeoutSeconds: 1
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: "1"
+              memory: 512Mi
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /var/lib/pgsql/data
+            name: gitlab-ce-volume-3
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: gitlab-ce-volume-3
+          persistentVolumeClaim:
+            claimName: ${APPLICATION_NAME}-postgresql
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - gitlab-ce-postgresql
+        from:
+          kind: ImageStreamTag
+          name: postgresql:9.4
+          namespace: openshift
+      type: ImageChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    ports:
+    - name: 22-ssh
+      port: 22
+      protocol: TCP
+      targetPort: 22
+    - name: 80-http
+      port: 80
+      protocol: TCP
+      targetPort: 80
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}-redis
+  spec:
+    ports:
+    - name: 6379-redis
+      port: 6379
+      protocol: TCP
+      targetPort: 6379
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}-redis
+    sessionAffinity: None
+    type: ClusterIP
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}-postgresql
+  spec:
+    ports:
+    - name: 5432-postgresql
+      port: 5432
+      protocol: TCP
+      targetPort: 5432
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}-postgresql
+    sessionAffinity: None
+    type: ClusterIP
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${APPLICATION_NAME}-redis-data
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${REDIS_VOL_SIZE}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${APPLICATION_NAME}-etc
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${ETC_VOL_SIZE}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${APPLICATION_NAME}-data
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${GITLAB_DATA_VOL_SIZE}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${APPLICATION_NAME}-postgresql
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${POSTGRESQL_VOL_SIZE}
+- apiVersion: v1
+  kind: Route
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    host: ${APPLICATION_HOSTNAME}
+    port:
+      targetPort: 80-http
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}
+parameters:
+- description: The Openshift Cluster IP address. 
+  displayName: Openshift Cluster IP.
+  name: CLUSTER_IP_ADDRESS
+  required: true
+- description: The name for the application. The service will be named like the application.
+  displayName: Application name.
+  name: APPLICATION_NAME
+  value: gitlab
+- description: Hostname for service routes. Set this in order to have the GitLab display. Ex.:: gitlab-cicd-devtools
+    the correct clone urls.
+  displayName: Gitlab instance hostname
+  name: APPLICATION_HOSTNAME
+  required: true
+- description: Password for the GitLab 'root' user. Must be at least 8 characters
+    long. Leave blank if you would rather configure the password using the website
+    during first use.
+  displayName: GitLab Root User Password
+  name: GITLAB_ROOT_PASSWORD
+  value: admin12345
+- description: Username for PostgreSQL user that will be used for accessing the database.
+  displayName: PostgreSQL User
+  from: user[A-Z0-9]{3}
+  generate: expression
+  name: POSTGRESQL_USER
+  required: true
+- description: Password for the PostgreSQL user.
+  displayName: PostgreSQL Password
+  from: '[a-zA-Z0-9]{16}'
+  generate: expression
+  name: POSTGRESQL_PASSWORD
+  required: true
+- description: Password for the PostgreSQL Admin user.
+  displayName: PostgreSQL Admin User Password
+  from: '[a-zA-Z0-9]{16}'
+  generate: expression
+  name: POSTGRESQL_ADMIN_PASSWORD
+  required: true
+- description: Name of the PostgreSQL database accessed.
+  displayName: PostgreSQL Database Name
+  name: POSTGRESQL_DATABASE
+  required: true
+  value: gitlabhq_production
+- description: Number of Unicorn Workers to use per instance. Must be at least 2.
+  displayName: Number of Unicorn Workers
+  name: UNICORN_WORKERS
+  required: true
+  value: "2"
+- description: Volume size for /etc
+  displayName: /etc/gitlab volume size
+  name: ETC_VOL_SIZE
+  value: 100Mi
+- description: Volume size for GitLab data
+  displayName: GitLab data volume size
+  name: GITLAB_DATA_VOL_SIZE
+  value: 5Gi
+- description: Volume size for postgresql data
+  displayName: postgresql volume size
+  name: POSTGRESQL_VOL_SIZE
+  value: 2Gi
+- description: Volume size for redis data
+  displayName: redis volume size
+  name: REDIS_VOL_SIZE
+  value: 512Mi
+# ############################################################
+# ########## JENKINS #########################################
+# ############################################################
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  app: jenkins-persistent
+  template: jenkins-persistent-template
+message: A Jenkins service has been created in your project. Log into Jenkins with
+  your OpenShift account. The tutorial at https://github.com/openshift/origin/blob/master/examples/jenkins/README.md
+  contains more information about using this template.
+metadata:
+  annotations:
+    description: |-
+      Jenkins service, with persistent storage.
+
+      NOTE: You must have persistent volumes available in your cluster to use this template.
+    iconClass: icon-jenkins
+    openshift.io/display-name: Jenkins
+    openshift.io/documentation-url: https://docs.okd.io/latest/using_images/other_images/jenkins.html
+    openshift.io/long-description: This template deploys a Jenkins server capable
+      of managing OpenShift Pipeline builds and supporting OpenShift-based oauth login.
+    openshift.io/provider-display-name: Red Hat, Inc.
+    openshift.io/support-url: https://access.redhat.com
+    tags: instant-app,jenkins
+  creationTimestamp: null
+  name: jenkins-persistent
+  selfLink: /apis/template.openshift.io/v1/namespaces/cicd-devtools/templates/jenkins-persistent
+objects:
+- apiVersion: v1
+  kind: Route
+  metadata:
+    annotations:
+      haproxy.router.openshift.io/timeout: 4m
+      template.openshift.io/expose-uri: http://{.spec.host}{.spec.path}
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    tls:
+      insecureEdgeTerminationPolicy: Redirect
+      termination: edge
+    to:
+      kind: Service
+      name: ${JENKINS_SERVICE_NAME}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${VOLUME_CAPACITY}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      template.alpha.openshift.io/wait-for-ready: "true"
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    replicas: 1
+    selector:
+      name: ${JENKINS_SERVICE_NAME}
+    strategy:
+      recreateParams:
+        post:
+          execNewPod:
+            command:
+            - /bin/sh
+            - c
+            - whoami
+            containerName: jenkins
+          failurePolicy: Ignore
+      resources: {}
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${JENKINS_SERVICE_NAME}
+      spec:
+        containers:
+        - capabilities: {}
+          env:
+          - name: OPENSHIFT_ENABLE_OAUTH
+            value: ${ENABLE_OAUTH}
+          - name: OPENSHIFT_ENABLE_REDIRECT_PROMPT
+            value: "true"
+          - name: DISABLE_ADMINISTRATIVE_MONITORS
+            value: ${DISABLE_ADMINISTRATIVE_MONITORS}
+          - name: KUBERNETES_MASTER
+            value: https://kubernetes.default:443
+          - name: KUBERNETES_TRUST_CERTIFICATES
+            value: "true"
+          - name: JENKINS_SERVICE_NAME
+            value: ${JENKINS_SERVICE_NAME}
+          - name: JNLP_SERVICE_NAME
+            value: ${JNLP_SERVICE_NAME}
+          - name: ENABLE_FATAL_ERROR_LOG_FILE
+            value: ${ENABLE_FATAL_ERROR_LOG_FILE}
+          image: ' '
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /login
+              port: 8080
+            initialDelaySeconds: 600
+            periodSeconds: 360
+            timeoutSeconds: 240
+          name: jenkins
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+            initialDelaySeconds: 3
+            timeoutSeconds: 240
+          resources:
+            limits:
+              memory: ${MEMORY_LIMIT}
+          securityContext:
+            capabilities: {}
+            privileged: false
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /var/lib/jenkins
+            name: ${JENKINS_SERVICE_NAME}-data
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        serviceAccountName: ${JENKINS_SERVICE_NAME}
+        volumes:
+        - name: ${JENKINS_SERVICE_NAME}-data
+          persistentVolumeClaim:
+            claimName: ${JENKINS_SERVICE_NAME}
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - jenkins
+        from:
+          kind: ImageStreamTag
+          name: ${JENKINS_IMAGE_STREAM_TAG}
+          namespace: ${NAMESPACE}
+        lastTriggeredImage: ""
+      type: ImageChange
+    - type: ConfigChange
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    annotations:
+      serviceaccounts.openshift.io/oauth-redirectreference.jenkins: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"${JENKINS_SERVICE_NAME}"}}'
+    name: ${JENKINS_SERVICE_NAME}
+- apiVersion: v1
+  groupNames: null
+  kind: RoleBinding
+  metadata:
+    name: ${JENKINS_SERVICE_NAME}_edit
+  roleRef:
+    name: edit
+  subjects:
+  - kind: ServiceAccount
+    name: ${JENKINS_SERVICE_NAME}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${JNLP_SERVICE_NAME}
+  spec:
+    ports:
+    - name: agent
+      nodePort: 0
+      port: 50000
+      protocol: TCP
+      targetPort: 50000
+    selector:
+      name: ${JENKINS_SERVICE_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      service.alpha.openshift.io/dependencies: '[{"name": "${JNLP_SERVICE_NAME}",
+        "namespace": "", "kind": "Service"}]'
+      service.openshift.io/infrastructure: "true"
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    ports:
+    - name: web
+      nodePort: 0
+      port: 80
+      protocol: TCP
+      targetPort: 8080
+    selector:
+      name: ${JENKINS_SERVICE_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+parameters:
+- description: The name of the OpenShift Service exposed for the Jenkins container.
+  displayName: Jenkins Service Name
+  name: JENKINS_SERVICE_NAME
+  value: jenkins
+- description: The name of the service used for master/slave communication.
+  displayName: Jenkins JNLP Service Name
+  name: JNLP_SERVICE_NAME
+  value: jenkins-jnlp
+- description: Whether to enable OAuth OpenShift integration. If false, the static
+    account 'admin' will be initialized with the password 'password'.
+  displayName: Enable OAuth in Jenkins
+  name: ENABLE_OAUTH
+  value: "true"
+- description: Maximum amount of memory the container can use.
+  displayName: Memory Limit
+  name: MEMORY_LIMIT
+  value: 2Gi
+- description: Volume space available for data, e.g. 512Mi, 2Gi.
+  displayName: Volume Capacity
+  name: VOLUME_CAPACITY
+  required: true
+  value: 1Gi
+- description: The OpenShift Namespace where the Jenkins ImageStream resides.
+  displayName: Jenkins ImageStream Namespace
+  name: NAMESPACE
+  value: openshift
+- description: Whether to perform memory intensive, possibly slow, synchronization
+    with the Jenkins Update Center on start.  If true, the Jenkins core update monitor
+    and site warnings monitor are disabled.
+  displayName: Disable memory intensive administrative monitors
+  name: DISABLE_ADMINISTRATIVE_MONITORS
+  value: "false"
+- description: Name of the ImageStreamTag to be used for the Jenkins image.
+  displayName: Jenkins ImageStreamTag
+  name: JENKINS_IMAGE_STREAM_TAG
+  value: jenkins:2
+- description: When a fatal error occurs, an error log is created with information
+    and the state obtained at the time of the fatal error.
+  displayName: Fatal Error Log File
+  name: ENABLE_FATAL_ERROR_LOG_FILE
+  value: "false"
+# ############################################################
+# ########## NEXUS ###########################################
+# ############################################################
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: nexus3-persistent-template
+metadata:
+  annotations:
+    description: Sonatype Nexus 3 persistent template
+    tags: ci,nexus
+  creationTimestamp: null
+  name: nexus3-persistent
+  selfLink: /apis/template.openshift.io/v1/namespaces/cicd-devtools/templates/nexus3-persistent
+objects:
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}
+  spec:
+    tags:
+    - from:
+        kind: DockerImage
+        name: docker.io/sonatype/nexus3:${NEXUS_VERSION}
+      name: ${NEXUS_VERSION}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}
+  spec:
+    replicas: 1
+    selector:
+      deploymentconfig: ${SERVICE_NAME}
+    strategy:
+      recreateParams:
+        post:
+          execNewPod:
+            command:
+            - /bin/bash
+            - -c
+            - curl -o /tmp/nexus-functions -s https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/scripts/nexus-functions;
+              source /tmp/nexus-functions; add_nexus3_redhat_repos admin admin123
+              http://${SERVICE_NAME}:8081
+            containerName: ${SERVICE_NAME}
+          failurePolicy: Abort
+        timeoutSeconds: 600
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          deploymentconfig: ${SERVICE_NAME}
+      spec:
+        containers:
+        - env:
+          - name: CONTEXT_PATH
+            value: /
+          image: ' '
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            exec:
+              command:
+              - echo
+              - ok
+            failureThreshold: 3
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          name: ${SERVICE_NAME}
+          ports:
+          - containerPort: 8081
+            protocol: TCP
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources:
+            limits:
+              memory: ${MAX_MEMORY}
+            requests:
+              memory: 512Mi
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /nexus-data
+            name: ${SERVICE_NAME}-data
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        securityContext:
+          runAsUser: 1000100001
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: ${SERVICE_NAME}-data
+          persistentVolumeClaim:
+            claimName: ${SERVICE_NAME}-pv
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - ${SERVICE_NAME}
+        from:
+          kind: ImageStreamTag
+          name: ${SERVICE_NAME}:${NEXUS_VERSION}
+      type: ImageChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}
+  spec:
+    ports:
+    - name: 8081-tcp
+      port: 8081
+      protocol: TCP
+      targetPort: 8081
+    selector:
+      deploymentconfig: ${SERVICE_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+- apiVersion: v1
+  kind: Route
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}
+  spec:
+    port:
+      targetPort: 8081-tcp
+    to:
+      kind: Service
+      name: ${SERVICE_NAME}
+      weight: 100
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    labels:
+      app: ${SERVICE_NAME}
+    name: ${SERVICE_NAME}-pv
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${VOLUME_CAPACITY}
+parameters:
+- displayName: Sonatype Nexus service name
+  name: SERVICE_NAME
+  required: true
+  value: nexus
+- displayName: Sonatype Nexus version
+  name: NEXUS_VERSION
+  required: true
+  value: 3.6.0
+- description: Volume space available for Sonatype Nexus e.g. 512Mi, 2Gi
+  displayName: Volume Space for Nexus
+  name: VOLUME_CAPACITY
+  required: true
+  value: 2Gi
+- description: Max memory allocated to the Nexus pod
+  displayName: Max Memory
+  name: MAX_MEMORY
+  required: true
+  value: 1Gi
+# ############################################################
+# ########## SONARQUBE POSTGRESQL ############################
+# ############################################################
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: sonarqube-postgresql-template
+message: A Sonarqube service has been created in your project. You can access using
+  admin/admin.
+metadata:
+  annotations:
+    description: |-
+      Sonarqube service, with PostgreSQL persistent storage.
+
+      NOTE: You must have persistent volumes available in your cluster to use this template.
+    openshift.io/display-name: SonarQube PostgreSQL (Persistent)
+    openshift.io/documentation-url: https://www.sonarqube.org/
+    openshift.io/long-description: This template deploys a SonarQube and PostgreSQL
+      servers.
+    tags: instant-app,sonarqube,postgresql
+  creationTimestamp: null
+  name: sonarqube-postgresql
+  selfLink: /apis/template.openshift.io/v1/namespaces/cicd-devtools/templates/sonarqube-postgresql
+objects:
+- apiVersion: v1
+  kind: Route
+  metadata:
+    annotations:
+      template.openshift.io/expose-uri: http://{.spec.host}{.spec.path}
+    name: ${SONARQUBE_SERVICE_NAME}
+  spec:
+    to:
+      kind: Service
+      name: ${SONARQUBE_SERVICE_NAME}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${SONARQUBE_SERVICE_NAME}-data
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${DATA_VOLUME_CAPACITY}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${SONARQUBE_SERVICE_NAME}-extensions
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${EXTENSIONS_VOLUME_CAPACITY}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      template.alpha.openshift.io/wait-for-ready: "true"
+    name: ${SONARQUBE_SERVICE_NAME}
+  spec:
+    replicas: 1
+    selector:
+      name: ${SONARQUBE_SERVICE_NAME}
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${SONARQUBE_SERVICE_NAME}
+      spec:
+        containers:
+        - capabilities: {}
+          env:
+          - name: SONARQUBE_JDBC_USERNAME
+            value: ${POSTGRESQL_USER}
+          - name: SONARQUBE_JDBC_PASSWORD
+            value: ${POSTGRESQL_PASSWORD}
+          - name: SONARQUBE_JDBC_URL
+            value: jdbc:postgresql://${SONARQUBE_SERVICE_NAME}-postgresql:5432/sonarqube
+          image: registry.centos.org/rhsyseng/sonarqube:latest
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 30
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 600
+            timeoutSeconds: 3
+          name: sonarqube
+          ports:
+          - containerPort: 9000
+            protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9000
+            initialDelaySeconds: 3
+            timeoutSeconds: 3
+          resources:
+            limits:
+              memory: ${SONARQUBE_MEMORY_LIMITS}
+            requests:
+              memory: ${SONARQUBE_MEMORY_LIMITS}
+          securityContext:
+            capabilities: {}
+            privileged: false
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /opt/sonarqube/data
+            name: ${SONARQUBE_SERVICE_NAME}-data
+          - mountPath: /opt/sonarqube/extensions
+            name: ${SONARQUBE_SERVICE_NAME}-extensions
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        serviceAccountName: ${SONARQUBE_SERVICE_NAME}
+        volumes:
+        - name: ${SONARQUBE_SERVICE_NAME}-data
+          persistentVolumeClaim:
+            claimName: ${SONARQUBE_SERVICE_NAME}-data
+        - name: ${SONARQUBE_SERVICE_NAME}-extensions
+          persistentVolumeClaim:
+            claimName: ${SONARQUBE_SERVICE_NAME}-extensions
+    triggers:
+    - type: ConfigChange
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ${SONARQUBE_SERVICE_NAME}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${SONARQUBE_SERVICE_NAME}
+  spec:
+    ports:
+    - port: 9000
+      protocol: TCP
+      targetPort: 9000
+    selector:
+      name: ${SONARQUBE_SERVICE_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    annotations:
+      template.openshift.io/expose-database_name: '{.data[''database-name'']}'
+      template.openshift.io/expose-password: '{.data[''database-password'']}'
+      template.openshift.io/expose-username: '{.data[''database-user'']}'
+    name: ${SONARQUBE_SERVICE_NAME}-postgresql
+  stringData:
+    database-name: sonarqube
+    database-password: ${POSTGRESQL_PASSWORD}
+    database-user: ${POSTGRESQL_USER}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      template.openshift.io/expose-uri: postgres://{.spec.clusterIP}:{.spec.ports[?(.name=="postgresql")].port}
+    name: ${SONARQUBE_SERVICE_NAME}-postgresql
+  spec:
+    ports:
+    - name: postgresql
+      nodePort: 0
+      port: 5432
+      protocol: TCP
+      targetPort: 5432
+    selector:
+      name: ${SONARQUBE_SERVICE_NAME}-postgresql
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${SONARQUBE_SERVICE_NAME}-postgresql
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${POSTGRESQL_VOLUME_CAPACITY}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      template.alpha.openshift.io/wait-for-ready: "true"
+    name: ${SONARQUBE_SERVICE_NAME}-postgresql
+  spec:
+    replicas: 1
+    selector:
+      name: ${SONARQUBE_SERVICE_NAME}-postgresql
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${SONARQUBE_SERVICE_NAME}-postgresql
+      spec:
+        containers:
+        - capabilities: {}
+          env:
+          - name: POSTGRESQL_USER
+            valueFrom:
+              secretKeyRef:
+                key: database-user
+                name: ${SONARQUBE_SERVICE_NAME}-postgresql
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: database-password
+                name: ${SONARQUBE_SERVICE_NAME}-postgresql
+          - name: POSTGRESQL_DATABASE
+            valueFrom:
+              secretKeyRef:
+                key: database-name
+                name: ${SONARQUBE_SERVICE_NAME}-postgresql
+          image: ' '
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            initialDelaySeconds: 60
+            tcpSocket:
+              port: 5432
+            timeoutSeconds: 1
+          name: postgresql
+          ports:
+          - containerPort: 5432
+            protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+              - /bin/sh
+              - -i
+              - -c
+              - psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c
+                'SELECT 1'
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+          resources:
+            limits:
+              memory: ${POSTGRESQL_MEMORY_LIMIT}
+          securityContext:
+            capabilities: {}
+            privileged: false
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - mountPath: /var/lib/pgsql/data
+            name: ${SONARQUBE_SERVICE_NAME}-postgresql
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        volumes:
+        - name: ${SONARQUBE_SERVICE_NAME}-postgresql
+          persistentVolumeClaim:
+            claimName: ${SONARQUBE_SERVICE_NAME}-postgresql
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - postgresql
+        from:
+          kind: ImageStreamTag
+          name: postgresql:${POSTGRESQL_VERSION}
+          namespace: ${NAMESPACE}
+        lastTriggeredImage: ""
+      type: ImageChange
+    - type: ConfigChange
+parameters:
+- description: The name of the OpenShift Service exposed for the SonarQube container.
+  displayName: SonarQube Service Name
+  name: SONARQUBE_SERVICE_NAME
+  value: sonar
+- description: Volume space available for data, e.g. 512Mi, 2Gi.
+  displayName: Data Volume Capacity
+  name: DATA_VOLUME_CAPACITY
+  required: true
+  value: 256Mi
+- description: Volume space available for extensions, e.g. 512Mi, 2Gi.
+  displayName: Extensions Volume Capacity
+  name: EXTENSIONS_VOLUME_CAPACITY
+  required: true
+  value: 256Mi
+- description: SonarQube container memory limits.
+  displayName: Memory Limits
+  name: SONARQUBE_MEMORY_LIMITS
+  required: true
+  value: 2Gi
+- description: Username for PostgreSQL backend
+  displayName: PostgreSQL Username
+  from: sonar[a-zA-Z0-9]{4}
+  generate: expression
+  name: POSTGRESQL_USER
+  required: true
+- description: Password for PostgreSQL backend
+  displayName: PostgreSQL Password
+  from: '[a-zA-Z0-9]{16}'
+  generate: expression
+  name: POSTGRESQL_PASSWORD
+  required: true
+- description: Volume space available for PostgreSQL, e.g. 512Mi, 2Gi.
+  displayName: PostgreSQL Volume Capacity
+  name: POSTGRESQL_VOLUME_CAPACITY
+  required: true
+  value: 1Gi
+- description: Maximum amount of memory PostgreSQL container can use.
+  displayName: PostgreSQL Memory Limit
+  name: POSTGRESQL_MEMORY_LIMIT
+  required: true
+  value: 512Mi
+- description: Version of PostgreSQL image to be used (9.2, 9.4, 9.5 or latest).
+  displayName: Version of PostgreSQL Image
+  name: POSTGRESQL_VERSION
+  required: true
+  value: "9.5"
+- description: The OpenShift Namespace where the ImageStream resides.
+  displayName: Namespace
+  name: NAMESPACE
+  value: openshift
+# ############################################################
+# ########## POST-ACTIONS ####################################
+# ############################################################
+# Setup Application Environment and Configurations
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: cicd-application-installer
+  spec:
+    activeDeadlineSeconds: 600
+    completions: 1
+    parallelism: 1
+    template:
+      spec:
+        containers:
+        - env:
+          - name: CICD_PROJECT_NAME
+            value: ${APPLICATION_NAME}
+          - name: CICD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          command:
+          - /bin/bash
+          - -x
+          - -c
+          - |
+            oc new-app --template=$CICD_PROJECT_NAME/gitlab-ce \
+            -p CLUSTER_IP_ADDRESS=192.168.42.90 \
+            -p APPLICATION_NAME=gitlab \
+            -p APPLICATION_HOSTNAME=gitlab-cicd-devtools \
+            -p GITLAB_ROOT_PASSWORD=admin12345
+            #  > gitlab-install_log.txt
+
+            sleep 3
+
+            oc rollout cancel dc/gitlab -n $CICD_PROJECT_NAME
+            oc rollout cancel dc/gitlab-postgresql -n $CICD_PROJECT_NAME
+            oc rollout cancel dc/gitlab-redis -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=gitlab --manual -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=gitlab-postgresql --manual -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=gitlab-redis --manual -n $CICD_PROJECT_NAME
+
+            sleep 5
+
+            oc adm policy add-scc-to-user anyuid system:serviceaccount:gitlab:gitlab-main-user
+            oc adm policy add-scc-to-user privileged system:serviceaccount:gitlab:gitlab-main-user
+            oc adm policy add-scc-to-user anyuid -z gitlab-main-user -n $CICD_PROJECT_NAME
+
+            sleep 3
+
+            oc new-app --template=$CICD_PROJECT_NAME/jenkins-persistent
+
+            sleep 3
+
+            oc rollout cancel dc/jenkins -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=jenkins --manual -n $CICD_PROJECT_NAME
+
+            sleep 5
+
+            oc new-app --template=$CICD_PROJECT_NAME/nexus3-persistent
+
+            sleep 3
+
+            oc rollout cancel dc/nexus -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=nexus --manual -n $CICD_PROJECT_NAME
+
+            sleep 5
+
+            oc new-app --template=$CICD_PROJECT_NAME/sonarqube-postgresql
+
+            sleep 3
+
+            oc rollout cancel dc/sonar -n $CICD_PROJECT_NAME
+            oc rollout cancel dc/sonar-postgresql -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=sonarqube --manual -n $CICD_PROJECT_NAME
+            oc set triggers dc -l app=sonarqube-postgresql --manual -n $CICD_PROJECT_NAME
+
+            sleep 5
+
+            oc policy add-role-to-user system pusher -n $CICD_PROJECT_NAME
+            oc policy add-role-to-user system image-builder -n $CICD_PROJECT_NAME
+            oc policy add-role-to-user pusher edit -n $CICD_PROJECT_NAME
+            oc policy add-role-to-user view system:serviceaccount:$(oc project -q):default
+
+            sleep 3
+
+            oc adm policy add-scc-to-group anyuid system:authenticated
+            oc adm policy add-scc-to-user anyuid -z default
+
+            # oc rollout resume dc/gitlab
+            # oc rollout resume dc/gitlab-postgresql
+            # oc rollout resume dc/gitlab-redis
+            # oc rollout resume dc/jenkins
+            # oc rollout resume dc/nexus
+            # oc rollout resume dc/sonar
+            # oc rollout resume dc/sonar-postgresql
+
+            # to install this template:
+            # oc new-app -n cicd-devtools -f cicd-devtools-infra.yaml --param CLUSTER_IP_ADDRESS=192.168.42.90
+
+          image: openshift/origin:v3.10
+          name: cicd-application-installer-job
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        restartPolicy: Never

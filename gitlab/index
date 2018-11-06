@@ -11,4 +11,4 @@ hostname='gitlab-cicd-devtools'
 initial delay = 600 seconds
 (readiness / liveness)
 
-
+oc debug dc/gitlab -- chown git /gitlab-data

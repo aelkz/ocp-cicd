@@ -15,4 +15,6 @@ oc create -f ocp-resources/sonar-pv.yaml
 oc create -f ocp-resources/sonarqube-postgresql-template.yaml -n cicd-devtools
 oc new-app sonarqube-postgresql
 
-
+mvn sonar:sonar \
+  -Dsonar.host.url=http://sonar-cicd-devtools.192.168.42.90.nip.io \
+  -Dsonar.login=83e74ef5288d15cb85bbebdfaeb78e43abd25d97

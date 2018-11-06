@@ -1,12 +1,14 @@
-apiVersion: v1
+apiVersion: template.openshift.io/v1
 kind: Template
 labels:
   template: nexus3-persistent-template
 metadata:
-  name: nexus3-persistent
   annotations:
     description: Sonatype Nexus 3 persistent template
     tags: ci,nexus
+  creationTimestamp: null
+  name: nexus3-persistent
+  selfLink: /apis/template.openshift.io/v1/namespaces/cicd-devtools/templates/nexus3-persistent
 objects:
 - apiVersion: v1
   kind: ImageStream
@@ -32,15 +34,17 @@ objects:
       deploymentconfig: ${SERVICE_NAME}
     strategy:
       recreateParams:
-        timeoutSeconds: 600
         post:
-          failurePolicy: Abort
           execNewPod:
-            containerName: ${SERVICE_NAME}
             command:
-              - "/bin/bash"
-              - "-c"
-              - "curl -o /tmp/nexus-functions -s https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/scripts/nexus-functions; source /tmp/nexus-functions; add_nexus3_redhat_repos admin admin123 http://${SERVICE_NAME}:8081"
+            - /bin/bash
+            - -c
+            - curl -o /tmp/nexus-functions -s https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/scripts/nexus-functions;
+              source /tmp/nexus-functions; add_nexus3_redhat_repos admin admin123
+              http://${SERVICE_NAME}:8081
+            containerName: ${SERVICE_NAME}
+          failurePolicy: Abort
+        timeoutSeconds: 600
       type: Recreate
     template:
       metadata:

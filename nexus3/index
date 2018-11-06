@@ -11,3 +11,16 @@ securityContext:
 
 securityContext:
   fsGroup: 2000
+
+
+lembre-se de configurar o arquivo configuration/cicd-settings-nexus3.xml com o mirror da instância nexus criada. Exemplo:
+
+<mirrors>
+    <mirror>
+      <!--This sends everything else to /public -->
+      <id>nexus</id>
+      <mirrorOf>*</mirrorOf>
+      <url>http://nexus-cicd-devtools.192.168.42.90.nip.io/repository/maven-all-public/</url>
+    </mirror>
+</mirrors>
+

@@ -1,10 +1,11 @@
 https://github.com/siamaksade/ansible-openshift-eclipse-che.git
-https://github.com/siamaksade/ansible-openshift-eclipse-che
+uhttps://github.com/siamaksade/ansible-openshift-eclipse-che
 https://github.com/eclipse/che/tree/master/deploy/openshift/templates
 
 
+ansible-playbook playbooks/openshift-eclipse-che.yaml -vvv -k
 
-
+-----
 oc apply -f pvc/che-server-pvc.yaml;
 
 oc new-app -f che-server-template.yaml -p ROUTING_SUFFIX=e8ca.engint.openshiftapps.com \

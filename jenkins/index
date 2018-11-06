@@ -1,0 +1,16 @@
+configurar gitlab credentials no jenkins:
+
+gitlab-credentials
+
+Jenkins > Credentials > System > Global credentials (unrestricted) > Add Credential
+
+root
+admin12345
+gitlab-credentials
+
+instalar o plugin: SonarQube Scanner
+https://jenkins.io/doc/pipeline/steps/sonar/
+
+configurar pipeline libs 'custom-functions'
+https://jenkins.io/doc/book/pipeline/shared-libraries/
+(ver imagem neste diretório)
