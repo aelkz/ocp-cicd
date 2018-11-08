@@ -5,6 +5,7 @@ https://blog.openshift.com/cicd-with-openshift/
 https://github.com/openshift/library/tree/master/community
 https://ruddra.com/openshift-python-gunicorn-nginx-jenkins-pipelines-part-two/
 https://access.redhat.com/solutions/2899091
+http://v1.uncontained.io/playbooks/fundamentals/template_development_guide.html
 
 eval $(minishift docker-env)
 eval $(minishift oc-env)
@@ -70,3 +71,4 @@ docker tag docker.io/openshift/wildfly-101-centos7:latest 172.30.1.1:5000/opensh
 docker tag 172.30.1.1:5000/openshift/wildfly-101-centos7:v10.1 openshift/wildfly-101-centos7:v10.1 
 -----
 
+oc process -f cicd-pipeline.yaml -n proj-gmapseta-dev -p APPLICATION_NAME=gmapseta-api -p GIT_URL_REPO=http://gitlab-cicd-devtools.apps.arekkusu.io/root/gmapseta-api.git -p SONAR_URL=http://sonar-cicd-devtools.apps.arekkusu.io -p CLUSTER_IP_ADDRESS=192.168.50.10 -p GIT_BRANCH=master -p DEV_PROJECT=proj-gmapseta-dev -p UAT_PROJECT=proj-gmapseta-uat -p PRD_PROJECT=proj-gmapseta-prd -p REPLICAS=1 | oc apply -f-
