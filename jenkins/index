@@ -12,6 +12,8 @@ instalar o plugin: SonarQube Scanner
 https://jenkins.io/doc/pipeline/steps/sonar/
 
 configurar pipeline libs 'custom-functions'
+> versionar o código das custom-functions no gitlab
+> jenkins > manage jenkins > configure system > global pipeline libraries
 https://jenkins.io/doc/book/pipeline/shared-libraries/
 (ver imagem neste diretório)
 

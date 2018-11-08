@@ -3,6 +3,7 @@ https://gitlab.cern.ch/invenio/template-openshift
 https://about.gitlab.com/2016/06/28/get-started-with-openshift-origin-3-and-gitlab/
 https://gitlab.com/gitlab-org/omnibus-gitlab/issues/3306
 https://developer.ibm.com/code/2017/07/13/step-step-guide-running-gitlab-ce-docker/
+https://blog.openshift.com/getting-any-docker-image-running-in-your-own-openshift-cluster/
 
 1) ajustar o gitlab-ce com o nome do host
 hostname='gitlab-cicd-devtools'
@@ -10,5 +11,15 @@ hostname='gitlab-cicd-devtools'
 2) após dar o apply no template, redefinir o healthcheck do gitlab-ce-postgresql
 initial delay = 600 seconds
 (readiness / liveness)
+
+$ oc adm policy add-scc-to-user anyuid system:serviceaccount:gitlab:gitlab-main-user
+$ oc adm policy add-scc-to-user privileged system:serviceaccount:gitlab:gitlab-main-user
+$ oadm policy add-scc-to-user anyuid -z default
+
+> oc edit scc anyuid
+- system:serviceaccount:cicd-devtools:gitlab-main-user
+- system:serviceaccount:cicd-devtools:gitlab-ce-user
+- system:serviceaccount:cicd-devtools:default
+- system:serviceaccount:cicd-devtools:gitlab
 
 oc debug dc/gitlab -- chown git /gitlab-data
