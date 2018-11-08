@@ -14,3 +14,10 @@ https://jenkins.io/doc/pipeline/steps/sonar/
 configurar pipeline libs 'custom-functions'
 https://jenkins.io/doc/book/pipeline/shared-libraries/
 (ver imagem neste diretório)
+
+http://gitlab-cicd-devtools.apps.arekkusu.io/root/custom-functions.git
+http://gitlab-cicd-devtools.apps.arekkusu.io/enterprise/gmapseta-api.git
+
+faça o download dos plugins no jenkins:
+- GitLab Downloaded Successfully.
+- Gitlab Authentication
